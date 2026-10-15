@@ -56,6 +56,7 @@
   "canvas": {
     "empty": "请选择页面以开始。",
     "fit": "适应窗口",
+    "refitText": "重新适应文本",
     "surface": "Koharu 画布",
     "unavailable": "WebGPU 画布不可用"
   },

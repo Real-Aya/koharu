@@ -183,48 +183,93 @@ export function cssFrame(frame: Frame, camera: Camera): CssFrame {
   }
 }
 
+export interface ResizeOptions {
+  /** Shift: keep the frame's aspect ratio. */
+  keepAspect?: boolean
+  /** Alt: resize symmetrically around the frame's centre. */
+  fromCenter?: boolean
+}
+
 export function resizeFrame(
   frame: Frame,
   handle: ResizeHandle,
   point: Point,
   minimumSize: number,
+  options: ResizeOptions = {},
 ): Frame {
   const direction = resizeDirections[handle]
   const angle = (frame.angle_degrees * Math.PI) / 180
   const widthAxis = { x: Math.cos(angle), y: Math.sin(angle) }
   const heightAxis = { x: -widthAxis.y, y: widthAxis.x }
   const center = { x: frame.x + frame.width * 0.5, y: frame.y + frame.height * 0.5 }
+  // The opposite edge stays put, or the centre does when resizing from the centre.
+  const anchorScale = options.fromCenter ? 0 : 1
   const anchor = {
     x:
       center.x -
-      widthAxis.x * direction.x * frame.width * 0.5 -
-      heightAxis.x * direction.y * frame.height * 0.5,
+      widthAxis.x * direction.x * frame.width * 0.5 * anchorScale -
+      heightAxis.x * direction.y * frame.height * 0.5 * anchorScale,
     y:
       center.y -
-      widthAxis.y * direction.x * frame.width * 0.5 -
-      heightAxis.y * direction.y * frame.height * 0.5,
+      widthAxis.y * direction.x * frame.width * 0.5 * anchorScale -
+      heightAxis.y * direction.y * frame.height * 0.5 * anchorScale,
   }
   const delta = { x: point.x - anchor.x, y: point.y - anchor.y }
-  const width = direction.x
-    ? Math.max(minimumSize, direction.x * dot(delta, widthAxis))
+  const extent = options.fromCenter ? 2 : 1
+  let width = direction.x
+    ? Math.max(minimumSize, direction.x * dot(delta, widthAxis) * extent)
     : frame.width
-  const height = direction.y
-    ? Math.max(minimumSize, direction.y * dot(delta, heightAxis))
+  let height = direction.y
+    ? Math.max(minimumSize, direction.y * dot(delta, heightAxis) * extent)
     : frame.height
-  const nextCenter = {
-    x:
-      anchor.x +
-      widthAxis.x * direction.x * width * 0.5 +
-      heightAxis.x * direction.y * height * 0.5,
-    y:
-      anchor.y +
-      widthAxis.y * direction.x * width * 0.5 +
-      heightAxis.y * direction.y * height * 0.5,
+  if (options.keepAspect) {
+    const ratio = frame.width / frame.height
+    if (direction.x && direction.y) {
+      // Corner: follow whichever axis the pointer moved further.
+      const scale = Math.max(width / frame.width, height / frame.height)
+      width = Math.max(minimumSize, frame.width * scale)
+      height = Math.max(minimumSize, width / ratio)
+      width = height * ratio
+    } else if (direction.x) {
+      height = Math.max(minimumSize, width / ratio)
+    } else {
+      width = Math.max(minimumSize, height * ratio)
+    }
   }
+  const nextCenter = options.fromCenter
+    ? center
+    : {
+        x:
+          anchor.x +
+          widthAxis.x * direction.x * width * 0.5 +
+          heightAxis.x * direction.y * height * 0.5,
+        y:
+          anchor.y +
+          widthAxis.y * direction.x * width * 0.5 +
+          heightAxis.y * direction.y * height * 0.5,
+      }
   return {
     ...frame,
     x: nextCenter.x - width * 0.5,
     y: nextCenter.y - height * 0.5,
+    width,
+    height,
+  }
+}
+
+/** Moves a frame by a page-space offset. */
+export function nudgeFrame(frame: Frame, dx: number, dy: number): Frame {
+  return { ...frame, x: frame.x + dx, y: frame.y + dy }
+}
+
+/** Grows or shrinks a frame by page-space amounts around its centre. */
+export function growFrame(frame: Frame, dw: number, dh: number, minimumSize: number): Frame {
+  const width = Math.max(minimumSize, frame.width + dw)
+  const height = Math.max(minimumSize, frame.height + dh)
+  return {
+    ...frame,
+    x: frame.x + (frame.width - width) * 0.5,
+    y: frame.y + (frame.height - height) * 0.5,
     width,
     height,
   }

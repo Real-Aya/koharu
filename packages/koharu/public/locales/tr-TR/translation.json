@@ -56,6 +56,7 @@
   "canvas": {
     "empty": "Başlamak için bir sayfa seçin.",
     "fit": "Pencereye Sığdır",
+    "refitText": "Metni yeniden sığdır",
     "surface": "Koharu tuvali",
     "unavailable": "WebGPU tuvali kullanılamıyor"
   },

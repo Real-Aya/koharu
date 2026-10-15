@@ -1,12 +1,16 @@
 'use client'
 
 import { useMemo, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { SelectionControls } from '@/components/editor/SelectionControls'
+import { call } from '@/lib/backend'
 import { effectiveLayerVisibility, expandLayerSelection, isTextLayer } from '@/lib/document'
 import { controlFrame, cssFrame, selectableLayer, type Camera } from '@/lib/geometry'
-import type {
-  EntityId,
+import { pageKey, projectKey, refresh } from '@/lib/queries'
+import {
+  commands,
+  type EntityId,
   Frame,
   Geometry,
   Page,
@@ -45,6 +49,7 @@ export function CanvasOverlay({
   onTransformFrame,
   onTransformEnd,
 }: CanvasOverlayProps) {
+  const { t } = useTranslation()
   const root = useRef<HTMLDivElement>(null)
   const expandedSelection = useMemo(
     () => expandLayerSelection(page.layers, selected),
@@ -74,6 +79,21 @@ export function CanvasOverlay({
     ? undefined
     : layers.find(({ layer }) => selectedIds.has(layer.id) && selectableLayer(layer))
   const scale = camera.zoom / window.devicePixelRatio
+  // Re-enable automatic sizing after the box was resized or the size was set by hand.
+  const refitText = selectedTextLayer?.typography
+    ? () => {
+        const typography = selectedTextLayer.typography
+        if (!typography) return
+        void call(commands.setTypography, [
+          {
+            layer: selectedTextLayer.id,
+            typography: { ...typography, size: null, auto_fit: true },
+          },
+        ])
+          .then(() => refresh(projectKey, pageKey))
+          .catch(() => undefined)
+      }
+    : undefined
 
   return (
     <div
@@ -132,6 +152,8 @@ export function CanvasOverlay({
           frame={selectionControl.frame}
           camera={camera}
           edgesOnly={Boolean(selectedTextLayer)}
+          onRefit={refitText}
+          refitLabel={t('canvas.refitText')}
           onTransformStart={onTransformStart}
           onTransformFrame={onTransformFrame}
           onTransformEnd={onTransformEnd}

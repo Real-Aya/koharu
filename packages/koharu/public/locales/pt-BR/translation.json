@@ -56,6 +56,7 @@
   "canvas": {
     "empty": "Selecione uma página para começar.",
     "fit": "Ajustar à janela",
+    "refitText": "Reajustar texto",
     "surface": "Tela do Koharu",
     "unavailable": "A tela WebGPU não está disponível"
   },

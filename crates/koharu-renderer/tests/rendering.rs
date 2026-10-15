@@ -227,3 +227,201 @@ fn public_layer_kinds_remain_export_metadata() {
         kind: ImageKind::Source,
     });
 }
+
+/// Renders `text` as a translated auto-fit paragraph inside a `width` x `height`
+/// frame and reports what the renderer chose.
+struct ThaiFit {
+    font_size: f32,
+    estimated_lines: f32,
+    overflow: bool,
+    below_readable: bool,
+    fonts: Vec<String>,
+}
+
+async fn fit_text(text: &str, language: &str, width: f64, height: f64) -> ThaiFit {
+    use koharu_scene::{
+        Authored, Geometry, LanguageTag, SourceText, TextLayout, TextLayoutKind, Translation,
+    };
+
+    let mut session = Session::memory().await.unwrap();
+    let mut ids = None;
+    let patch = session
+        .snapshot()
+        .patch(|edit| {
+            let page = edit.add_page(PageDraft::new("page", 600.0, 600.0), At::End)?;
+            let content = edit.add_text_content(page, At::End)?;
+            edit.set(
+                content,
+                &SourceText {
+                    text: Authored::user("元".to_owned()),
+                    language: None,
+                },
+            )?;
+            edit.set(
+                content,
+                &Translation {
+                    text: Authored::user(text.to_owned()),
+                    language: Some(LanguageTag::new(language).unwrap()),
+                },
+            )?;
+            let layer = edit.add_text_layer(
+                page,
+                At::End,
+                content,
+                &TextLayout {
+                    origin: Origin::User,
+                    kind: TextLayoutKind::Paragraph,
+                    angle_degrees: Some(0.0),
+                },
+            )?;
+            edit.set(layer, &Geometry::rectangle(20.0, 20.0, width, height))?;
+            ids = Some((page, layer));
+            Ok(())
+        })
+        .unwrap();
+    let snapshot = session.commit(patch).await.unwrap().snapshot;
+    let (page, layer) = ids.unwrap();
+    let frame = Renderer::new()
+        .unwrap()
+        .render(&snapshot, page)
+        .await
+        .unwrap();
+    let layer_ref = frame.layer(layer).expect("text layer rendered");
+    let LayerKind::Text(meta) = layer_ref.kind() else {
+        panic!("expected text layer");
+    };
+    let diagnostics = frame.diagnostics();
+    ThaiFit {
+        font_size: meta.font_size,
+        // Thai line pitch is about 1.2em in the default metrics.
+        estimated_lines: meta.layout_bounds.height / (meta.font_size * 1.2),
+        overflow: diagnostics
+            .iter()
+            .any(|d| matches!(d, koharu_renderer::RenderDiagnostic::TextOverflow { entity, .. } if *entity == layer)),
+        below_readable: diagnostics.iter().any(|d| {
+            matches!(d, koharu_renderer::RenderDiagnostic::TextBelowReadableSize { entity, .. } if *entity == layer)
+        }),
+        fonts: meta.post_script_fonts.clone(),
+    }
+}
+
+const THAI_SAMPLES: &[(&str, &str)] = &[
+    ("short", "ไม่ต้องห่วงหรอก"),
+    (
+        "medium-spaced",
+        "ฉันไม่เคยคิดเลยว่าวันนี้ จะมาถึงเร็วขนาดนี้ ขอบคุณทุกคนมากนะ",
+    ),
+    (
+        "long-unspaced",
+        "เมื่อวานนี้ฉันไปที่โรงเรียนและได้พบกับเพื่อนเก่าที่ไม่ได้เจอกันมานานหลายปีเขาดูแข็งแรงดีมากเลย",
+    ),
+];
+
+#[tokio::test]
+async fn thai_bubble_text_report() {
+    for (name, text) in THAI_SAMPLES {
+        for (w, h) in [(120.0, 160.0), (160.0, 100.0)] {
+            let fit = fit_text(text, "th", w, h).await;
+            eprintln!(
+                "THAI {name:14} box {w:>4}x{h:<4} size {:>6.2} lines~{:>4.1} overflow {} below_min {} fonts {:?}",
+                fit.font_size, fit.estimated_lines, fit.overflow, fit.below_readable, fit.fonts
+            );
+        }
+    }
+    let en = fit_text(
+        "I never thought this day would come so fast. Thank you all!",
+        "en",
+        120.0,
+        160.0,
+    )
+    .await;
+    eprintln!(
+        "ENGLISH control size {:.2} overflow {} fonts {:?}",
+        en.font_size, en.overflow, en.fonts
+    );
+}
+
+#[tokio::test]
+async fn thai_text_uses_a_thai_capable_font() {
+    let fit = fit_text(THAI_SAMPLES[1].1, "th", 160.0, 200.0).await;
+    assert!(
+        fit.fonts.iter().any(|font| {
+            let font = font.to_ascii_lowercase();
+            [
+                "thai",
+                "leelawadee",
+                "tahoma",
+                "sarabun",
+                "angsana",
+                "browallia",
+                "cordia",
+                "norasi",
+                "loma",
+            ]
+            .iter()
+            .any(|name| font.contains(name))
+        }),
+        "no Thai-capable font among {:?}",
+        fit.fonts
+    );
+}
+
+#[tokio::test]
+async fn thai_text_in_a_bubble_stays_readable_without_overflow() {
+    for (name, text) in THAI_SAMPLES {
+        let fit = fit_text(text, "th", 160.0, 200.0).await;
+        assert!(
+            !fit.overflow,
+            "{name}: overflowed at size {:.2}",
+            fit.font_size
+        );
+        assert!(
+            fit.font_size >= 12.0,
+            "{name}: font shrank to {:.2}px",
+            fit.font_size
+        );
+    }
+}
+
+/// Traditional Thai faces (Angsana/Browallia/Cordia families) have a tiny x-height, so
+/// Thai text set in them looks about half the size of the requested point size.
+#[tokio::test]
+async fn thai_text_is_not_set_in_a_small_x_height_face_when_a_normal_one_exists() {
+    let fit = fit_text(THAI_SAMPLES[1].1, "th", 160.0, 200.0).await;
+    let position = |names: &[&str]| {
+        fit.fonts.iter().position(|font| {
+            let font = font.to_ascii_lowercase();
+            names.iter().any(|name| font.contains(name))
+        })
+    };
+    let small = position(&[
+        "angsana",
+        "browallia",
+        "cordia",
+        "dillenia",
+        "eucrosia",
+        "freesia",
+        "iris",
+        "jasmine",
+        "kodchiang",
+        "lily",
+        "norasi",
+    ]);
+    let normal = position(&[
+        "leelawadee",
+        "notosansthai",
+        "tahoma",
+        "sarabun",
+        "thonburi",
+        "garuda",
+        "loma",
+    ]);
+    if let (Some(small), Some(normal)) = (small, normal) {
+        assert!(
+            normal < small,
+            "small-x-height face ahead of a normal one: {:?}",
+            fit.fonts
+        );
+    }
+    assert!(normal.is_some(), "no regular Thai face in {:?}", fit.fonts);
+}

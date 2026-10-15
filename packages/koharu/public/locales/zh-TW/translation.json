@@ -56,6 +56,7 @@
   "canvas": {
     "empty": "請選擇頁面以開始。",
     "fit": "適應視窗",
+    "refitText": "重新適應文字",
     "surface": "Koharu 畫布",
     "unavailable": "WebGPU 畫布無法使用"
   },

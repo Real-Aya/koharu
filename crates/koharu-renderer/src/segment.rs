@@ -326,6 +326,41 @@ fn hyphenatable_word_bounds(text: &str) -> Option<(usize, usize)> {
 mod tests {
     use super::*;
 
+    const THAI_LONG: &str =
+        "เมื่อวานนี้ฉันไปที่โรงเรียนและได้พบกับเพื่อนเก่าที่ไม่ได้เจอกันมานานหลายปีเขาดูแข็งแรงดีมากเลย";
+
+    #[test]
+    fn thai_text_without_spaces_has_word_break_opportunities() {
+        let segments: Vec<&str> = LineBreaker::new()
+            .line_segments(THAI_LONG)
+            .iter()
+            .map(|segment| &THAI_LONG[segment.range.clone()])
+            .collect();
+        eprintln!("THAI SEGMENTS: {segments:?}");
+        assert!(segments.len() >= 8, "only {} segments", segments.len());
+    }
+
+    #[test]
+    fn thai_breaks_never_precede_combining_marks_or_follow_leading_vowels() {
+        let segments: Vec<&str> = LineBreaker::new()
+            .line_segments(THAI_LONG)
+            .iter()
+            .map(|segment| &THAI_LONG[segment.range.clone()])
+            .collect();
+        for pair in segments.windows(2) {
+            let next = pair[1].chars().next().unwrap();
+            let last = pair[0].chars().next_back().unwrap();
+            assert!(
+                !matches!(next, 'ะ'..='ฺ' | 'ๅ' | '็'..='๎'),
+                "segment starts with a dependent vowel/tone mark: {pair:?}"
+            );
+            assert!(
+                !matches!(last, 'เ'..='ไ'),
+                "segment ends with a leading vowel: {pair:?}"
+            );
+        }
+    }
+
     #[test]
     fn break_on_whitespace() {
         let text = "The quick brown fox jumps over the lazy dog.";

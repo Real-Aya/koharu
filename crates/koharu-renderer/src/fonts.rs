@@ -51,6 +51,44 @@ const SYMBOL_FALLBACK_FAMILIES: &[&str] = &[
     "Arial Unicode MS",
 ];
 
+/// Thai faces with a normal x-height, tried before the platform's own Thai fallback.
+const THAI_PREFERRED_FAMILIES: &[&str] = &[
+    "Leelawadee UI",
+    "Leelawadee",
+    "Noto Sans Thai",
+    "Noto Sans Thai UI",
+    "Sarabun",
+    "Tahoma",
+    "Thonburi",
+    "Ayuthaya",
+    "Loma",
+    "Garuda",
+];
+
+/// Traditional Thai faces (the "New"/UPC families) have a tiny x-height, so text set in
+/// them looks about half as large as the same point size in any other font. Operating
+/// systems list them first for the Thai script, so they are demoted to a last resort.
+const THAI_LAST_RESORT_FAMILIES: &[&str] = &[
+    "Angsana New",
+    "AngsanaUPC",
+    "Browallia New",
+    "BrowalliaUPC",
+    "Cordia New",
+    "CordiaUPC",
+    "DilleniaUPC",
+    "EucrosiaUPC",
+    "FreesiaUPC",
+    "IrisUPC",
+    "JasmineUPC",
+    "KodchiangUPC",
+    "LilyUPC",
+    "Norasi",
+];
+
+fn is_family_in(list: &[&str], family: &str) -> bool {
+    list.iter().any(|name| name.eq_ignore_ascii_case(family))
+}
+
 fn symbol_fallback_families() -> &'static [String] {
     static FAMILIES: LazyLock<Vec<String>> = LazyLock::new(|| {
         SYMBOL_FALLBACK_FAMILIES
@@ -491,6 +529,35 @@ impl FontSystem {
                     candidates.push(font.clone());
                     QueryStatus::Continue
                 });
+            }
+
+            if script == Script::from_bytes(*b"Thai") {
+                let mut preferred = Vec::new();
+                {
+                    let mut query = self.collection.query(&mut self.sources);
+                    query.set_families(
+                        THAI_PREFERRED_FAMILIES
+                            .iter()
+                            .map(|family| QueryFamily::Named(family)),
+                    );
+                    query.set_attributes(attributes);
+                    query.matches_with(|font| {
+                        preferred.push(font.clone());
+                        QueryStatus::Continue
+                    });
+                }
+                candidates.extend(preferred);
+                let mut keyed = Vec::with_capacity(candidates.len());
+                for candidate in candidates {
+                    let demoted = self
+                        .collection
+                        .family_name(candidate.family.0)
+                        .is_some_and(|name| is_family_in(THAI_LAST_RESORT_FAMILIES, name));
+                    keyed.push((demoted, candidate));
+                }
+                // Stable sort: only moves last-resort families behind everything else.
+                keyed.sort_by_key(|(demoted, _)| *demoted);
+                candidates = keyed.into_iter().map(|(_, candidate)| candidate).collect();
             }
 
             for candidate in candidates {
